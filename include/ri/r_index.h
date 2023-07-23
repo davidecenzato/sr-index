@@ -12,13 +12,14 @@
 
 namespace ri {
 
-class LocateIndex {
+class SearchIndex {
  public:
   virtual std::vector<std::size_t> Locate(const std::string &_pattern) const = 0;
+  virtual std::size_t Count(const std::string &_pattern) const = 0;
 };
 
 template<typename TBackwardNav, typename TGetLastValue, typename TComputeAllValues, typename TGetFinalValue>
-class RIndex : public LocateIndex {
+class RIndex : public SearchIndex {
  public:
   RIndex(const TBackwardNav &t_lf,
          const TGetLastValue &t_get_last_value,
@@ -41,6 +42,29 @@ class RIndex : public LocateIndex {
     return values;
   }
 
+  std::size_t Count(const std::string &t_pattern) const override
+  {
+
+    Range range = {0, bwt_size_ - 1};
+
+    auto i = t_pattern.size() - 1;
+
+    for (auto it = rbegin(t_pattern); it != rend(t_pattern) && range.first <= range.second; ++it, --i)
+    {
+      auto c = *it;
+
+      auto next_range = lf_(range, c);
+      range = next_range;
+    }
+
+    if (range.first <= range.second)
+    {
+      return range.second - range.first + 1;
+    }
+    else{ return 0; }
+    
+  }
+
   template<typename TPattern, typename TReport>
   void Locate(const TPattern &t_pattern, TReport &t_report) const {
     Range range = {0, bwt_size_ - 1};
@@ -61,6 +85,30 @@ class RIndex : public LocateIndex {
       compute_all_values_(range, last_value, t_report);
     }
   }
+
+  /*
+  template<typename TPattern, typename TReport>
+  void Count(const TPattern &t_pattern, TReport &t_report) const {
+    Range range = {0, bwt_size_ - 1};
+
+    auto i = t_pattern.size() - 1;
+
+    for (auto it = rbegin(t_pattern); it != rend(t_pattern) && range.first <= range.second; ++it, --i)
+    {
+      auto c = *it;
+
+      auto next_range = lf_(range, c);
+      range = next_range;
+    }
+
+    if (range.first <= range.second)
+    {
+      t_report = range.second - range.first + 1;
+    }
+    else{ t_report = 0; }
+
+  }
+  */
 
  private:
   using Range = std::pair<std::size_t, std::size_t>;

@@ -79,7 +79,7 @@ if (ri_build_tools)
 endif ()
 
 
-if (ri_build_benchmarks)
+#if (ri_build_benchmarks)
     include(ConfigGBenchmark)
 
     find_library(GFLAGS_LIB gflags REQUIRED)
@@ -93,4 +93,7 @@ if (ri_build_benchmarks)
 
     cxx_executable_with_flags(bm_build_ri_items "" "${GFLAGS_LIB};benchmark;ri;${LIBS};${CMAKE_THREAD_LIBS_INIT}" benchmark/bm_build_ri_items.cpp)
     cxx_executable_with_flags(bm_locate "" "${GFLAGS_LIB};benchmark;ri;${LIBS};${CMAKE_THREAD_LIBS_INIT}" benchmark/bm_locate.cpp)
-endif ()
+
+    cxx_executable_with_flags(construct "" "ri;${LIBS};${CMAKE_THREAD_LIBS_INIT}" benchmark/construct-index.cpp)
+    cxx_executable_with_flags(locate "" "ri;${LIBS};${CMAKE_THREAD_LIBS_INIT}" benchmark/locate.cpp)
+#endif ()

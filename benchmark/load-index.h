@@ -1,5 +1,6 @@
 //
 // Created by Dustin Cobas <dustin.cobas@gmail.com> on 8/28/20.
+// modified by Davide Cenzato on 7/23/23.
 //
 
 #ifndef RI_BENCHMARK_FACTORY_H_
@@ -28,26 +29,21 @@ class Factory {
     RIndexSampledWithTrustedAreas
   };
 
-  Factory(const sdsl::cache_config &t_config) : config_{t_config} {
-    //std::ofstream breakdown_csv("breakdown.csv");
-    //breakdown_csv << "BWT" << std::endl;
+  Factory(const sdsl::cache_config &t_config, const std::size_t s, const bool sIndex) : config_{t_config} {
 
     //Loading run-length encoded BWT
     load(bwt_rle_, ri::KEY_BWT_RLE);
     seq_size_ = bwt_rle_.item.size();
-    //std::cout << seq_size_ << "\n";
 
     // Loading F array
     load(f_, ri::KEY_F);
-    //std::cout << f_.item.size() << "\n";
     
     // Loading original r-index components
-    {
       auto &components = r_index_packs_[0];
       load(components.tails_in_text, ri::KEY_BWT_TAILS_TEXT_POS);
 
       load(components.heads_in_text_bv, ri::KEY_BWT_HEADS_TEXT_POS + "_bv_sd");
-//      load(components.heads_in_text_bv, ri::KEY_BWT_HEADS_TEXT_POS + "_bv");
+      //load(components.heads_in_text_bv, ri::KEY_BWT_HEADS_TEXT_POS + "_bv");
 
       components.rank_heads_in_text_bv.item =
           decltype(components.rank_heads_in_text_bv.item)(&components.heads_in_text_bv.item);
@@ -57,45 +53,40 @@ class Factory {
       components.select_heads_in_text_bv.computeSize();
 
       load(components.tail_idxs_by_heads_in_text, ri::KEY_BWT_TAILS_SAMPLED_IDX_BY_HEAD_IN_TEXT);
-    }
+
+      // Loading sampled r-index components
+      for (int i = 4; i <= s; i *= 2) {
+
+        auto &components = r_index_packs_[i];
+
+        auto prefix = std::to_string(i) + "_";
+        
+        load(components.tails_in_text, prefix + ri::KEY_BWT_TAILS_TEXT_POS_SAMPLED);
+
+        load(components.heads_in_text_bv, prefix + ri::KEY_BWT_HEADS_SAMPLED_TEXT_POS + "_bv_sd");
+        //load(components.heads_in_text_bv, prefix + ri::KEY_BWT_HEADS_SAMPLED_TEXT_POS + "_bv");
+        components.rank_heads_in_text_bv.item =
+            decltype(components.rank_heads_in_text_bv.item)(&components.heads_in_text_bv.item);
+        components.rank_heads_in_text_bv.computeSize();
+        components.select_heads_in_text_bv.item =
+            decltype(components.select_heads_in_text_bv.item)(&components.heads_in_text_bv.item);
+        components.select_heads_in_text_bv.computeSize();
     
+        load(components.tail_idxs_by_heads_in_text, prefix + ri::KEY_BWT_TAILS_SAMPLED_IDX_BY_HEAD_IN_TEXT);
 
-    // Loading sampled r-index components
-    //for (int i = 4; i <= 512; i *= 2) {
-    for (int i = 4; i <= 64; i *= 2) {
-      std::cout << "s: " << i << "\n";
-      auto &components = r_index_packs_[i];
+        load(components.sampled_tails_idx_bv, prefix + ri::KEY_BWT_TAILS_SAMPLED_IDX + "_bv_sd");
+        //load(components.sampled_tails_idx_bv, prefix + ri::KEY_BWT_TAILS_SAMPLED_IDX + "_bv");
+        components.rank_sampled_tails_idx_bv.item =
+            decltype(components.rank_sampled_tails_idx_bv.item)(&components.sampled_tails_idx_bv.item);
+        components.rank_sampled_tails_idx_bv.computeSize();
 
-      auto prefix = std::to_string(i) + "_";
-      
-      load(components.tails_in_text, prefix + ri::KEY_BWT_TAILS_TEXT_POS_SAMPLED);
+        //load(components.marked_sampled_idxs_bv, prefix + ri::KEY_BWT_TAILS_MARKED_SAMPLED_IDX_BY_HEAD_IN_TEXT + "_bv_sd");
+        load(components.marked_sampled_idxs_bv, prefix + ri::KEY_BWT_TAILS_MARKED_SAMPLED_IDX_BY_HEAD_IN_TEXT + "_bv");
+        components.rank_marked_sampled_idxs_bv.item =
+            decltype(components.rank_marked_sampled_idxs_bv.item)(&components.marked_sampled_idxs_bv.item);
 
-      load(components.heads_in_text_bv, prefix + ri::KEY_BWT_HEADS_SAMPLED_TEXT_POS + "_bv_sd");
-//      load(components.heads_in_text_bv, prefix + ri::KEY_BWT_HEADS_SAMPLED_TEXT_POS + "_bv");
-      components.rank_heads_in_text_bv.item =
-          decltype(components.rank_heads_in_text_bv.item)(&components.heads_in_text_bv.item);
-      components.rank_heads_in_text_bv.computeSize();
-      components.select_heads_in_text_bv.item =
-          decltype(components.select_heads_in_text_bv.item)(&components.heads_in_text_bv.item);
-      components.select_heads_in_text_bv.computeSize();
-  
-      load(components.tail_idxs_by_heads_in_text, prefix + ri::KEY_BWT_TAILS_SAMPLED_IDX_BY_HEAD_IN_TEXT);
-
-      load(components.sampled_tails_idx_bv, prefix + ri::KEY_BWT_TAILS_SAMPLED_IDX + "_bv_sd");
-//      load(components.sampled_tails_idx_bv, prefix + ri::KEY_BWT_TAILS_SAMPLED_IDX + "_bv");
-      components.rank_sampled_tails_idx_bv.item =
-          decltype(components.rank_sampled_tails_idx_bv.item)(&components.sampled_tails_idx_bv.item);
-      components.rank_sampled_tails_idx_bv.computeSize();
-
-//      load(components.marked_sampled_idxs_bv, prefix + ri::KEY_BWT_TAILS_MARKED_SAMPLED_IDX_BY_HEAD_IN_TEXT + "_bv_sd");
-      load(components.marked_sampled_idxs_bv, prefix + ri::KEY_BWT_TAILS_MARKED_SAMPLED_IDX_BY_HEAD_IN_TEXT + "_bv");
-      components.rank_marked_sampled_idxs_bv.item =
-          decltype(components.rank_marked_sampled_idxs_bv.item)(&components.marked_sampled_idxs_bv.item);
-
-      load(components.head_marked_sample_trusted_areas, prefix + ri::KEY_BWT_HEADS_MARKED_SAMPLED_TRUSTED_AREA_IN_TEXT);
-
-    }
-    
+        load(components.head_marked_sample_trusted_areas, prefix + ri::KEY_BWT_HEADS_MARKED_SAMPLED_TRUSTED_AREA_IN_TEXT);
+      }
   }
 
   auto SequenceSize() const {

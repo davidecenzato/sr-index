@@ -1,14 +1,6 @@
-//
-// Created by Dustin Cobas <dustin.cobas@gmail.com> on 8/15/20.
-//
-
 #include <iostream>
 #include <algorithm>
-
-#define STRIP_FLAG_HELP 1
-#include <gflags/gflags.h>
-
-#include <benchmark/benchmark.h>
+#include <cmath>
 
 #include <sdsl/config.hpp>
 #include <sdsl/construct.hpp>
@@ -17,169 +9,140 @@
 #include <ri/rle_string.hpp>
 #include "definitions.h"
 
-DEFINE_string(data, "", "Data file. (MANDATORY)");
-DEFINE_bool(rebuild, false, "Rebuild all the items.");
-DEFINE_bool(sais, true, "SE_SAIS or LIBDIVSUFSORT algorithm for Suffix Array construction.");
+void construct_text(std::string input_file, sdsl::cache_config *t_config)
+{
 
-void SetupCommonCounters(benchmark::State &t_state) {
-  t_state.counters["n"] = 0;
-  t_state.counters["r"] = 0;
-  t_state.counters["s"] = 0;
-  t_state.counters["r'"] = 0;
-  t_state.counters["mr'"] = 0;
+	std::size_t n;
+	sdsl::int_vector<8> text;
+
+	std::string input;
+	{
+	  std::ifstream fs(input_file);
+	  std::stringstream buffer;
+	  buffer << fs.rdbuf();
+	  
+	  input = buffer.str();
+	}
+
+	// Construct text representation for SDSL use.
+	n = input.size();
+	text.resize(input.size() + 1);
+
+	replace_copy(input.begin(), input.end(), text.begin(), 0, 2);
+
+	text[text.size() - 1] = 0; // Append symbol zero at the end
+
+	sdsl::store_to_cache(text, sdsl::conf::KEY_TEXT, *t_config);
+
 }
 
-//auto BM_Template = [](benchmark::State &t_state, auto *t_config, const auto &_idx) {
-//  for (auto _ : t_state) {
-//  }
-//
-//  SetupCommonCounters(t_state);
-//};
-
-/// Build text representation to use with SDSL functionalities.
-auto BM_BuildText = [](benchmark::State &t_state, auto *t_config, const auto &t_data_path) {
-  std::size_t n;
-  for (auto _ : t_state) {
-    sdsl::int_vector<8> text;
-    {
-      // Load input text by streaming from disc
-      std::string input;
-      {
-        std::ifstream fs(t_data_path);
-        std::stringstream buffer;
-        buffer << fs.rdbuf();
-
-        input = buffer.str();
-      }
-
-      // Construct text representation for SDSL use.
-      n = input.size();
-      text.resize(input.size() + 1);
-
-      replace_copy(input.begin(), input.end(), text.begin(), 0, 2);
-
-      text[text.size() - 1] = 0; // Append symbol zero at the end
-    }
-
-    sdsl::store_to_cache(text, sdsl::conf::KEY_TEXT, *t_config);
-//    sdsl::util::clear(text);
-  }
-
-  SetupCommonCounters(t_state);
-  t_state.counters["n"] = n;
-};
-
-/// Build Suffix Array.
-auto BM_BuildSA = [](benchmark::State &t_state, auto *t_config) {
-  for (auto _ : t_state) {
-    // Use SDSL functionality to build the SA
+void construct_sa(sdsl::cache_config *t_config)
+{
+	// Use SDSL functionality to build the SA
     sdsl::construct_sa<8>(*t_config);
-  }
+}
 
-  SetupCommonCounters(t_state);
-};
+void construct_bwt(sdsl::cache_config *t_config)
+{
+	typedef sdsl::int_vector<>::size_type size_type;
+	typedef sdsl::int_vector<8> text_type;
+	typedef sdsl::int_vector_buffer<8> bwt_type;
 
-/// Build Burrows Wheeler Transforms and compute its runs.
-auto BM_BuildBWT = [](benchmark::State &t_state, auto *t_config) {
-  typedef sdsl::int_vector<>::size_type size_type;
-  typedef sdsl::int_vector<8> text_type;
-  typedef sdsl::int_vector_buffer<8> bwt_type;
+	// Load text from disk
+	sdsl::int_vector<8> text;
+	load_from_cache(text, sdsl::conf::KEY_TEXT, *t_config);
+	auto n = text.size();
+	uint8_t bwt_width = text.width();
 
-  // Load text from disk
-  sdsl::int_vector<8> text;
-  load_from_cache(text, sdsl::conf::KEY_TEXT, *t_config);
-  auto n = text.size();
-  uint8_t bwt_width = text.width();
+	sdsl::int_vector<> bwt_heads_pos; // BWT run heads positions in BWT Array
+	sdsl::int_vector<> bwt_heads_text_pos; // BWT run heads positions in Text
+	std::vector<std::size_t> bwt_heads_text_pos_vec; // BWT run heads positions in Text (vector)
+	sdsl::int_vector<> bwt_tails_pos; // BWT run tails positions in BWT Array
+	sdsl::int_vector<> bwt_tails_text_pos; // BWT run tails positions in Text
+	std::vector<std::size_t> bwt_tails_text_pos_vec; // BWT run tails positions in Text (vector)
+	sdsl::bit_vector bwt_heads_in_text_bv; // Mark positions of BWT run heads in text (bitvector)
+	sdsl::sd_vector<> bwt_heads_in_text_bv_sd; // Mark positions of BWT run heads in text (sparse bitvector)
+	std::vector<std::size_t> f(256, 0); // F Array
 
-  sdsl::int_vector<> bwt_heads_pos; // BWT run heads positions in BWT Array
-  sdsl::int_vector<> bwt_heads_text_pos; // BWT run heads positions in Text
-  std::vector<std::size_t> bwt_heads_text_pos_vec; // BWT run heads positions in Text (vector)
-  sdsl::int_vector<> bwt_tails_pos; // BWT run tails positions in BWT Array
-  sdsl::int_vector<> bwt_tails_text_pos; // BWT run tails positions in Text
-  std::vector<std::size_t> bwt_tails_text_pos_vec; // BWT run tails positions in Text (vector)
-  sdsl::bit_vector bwt_heads_in_text_bv; // Mark positions of BWT run heads in text (bitvector)
-  sdsl::sd_vector<> bwt_heads_in_text_bv_sd; // Mark positions of BWT run heads in text (sparse bitvector)
-  std::vector<std::size_t> f(256, 0); // F Array
+	std::size_t r;
 
-  std::size_t r;
+	{
+		// Prepare to stream SA from disc
+		size_type buffer_size = 1000000; // buffer_size is a multiple of 8!, TODO: still true?
+		sdsl::int_vector_buffer<> sa_buf(sdsl::cache_file_name(sdsl::conf::KEY_SA, *t_config), std::ios::in, buffer_size);
 
-  for (auto _ : t_state) {
-    // Prepare to stream SA from disc
-    size_type buffer_size = 1000000; // buffer_size is a multiple of 8!, TODO: still true?
-    sdsl::int_vector_buffer<> sa_buf(sdsl::cache_file_name(sdsl::conf::KEY_SA, *t_config), std::ios::in, buffer_size);
+		// Build BWT sequentially by streaming SA and random access to text
+		std::string bwt_file = cache_file_name(sdsl::conf::KEY_BWT, *t_config);
+		bwt_type bwt_buf(bwt_file, std::ios::out, buffer_size, bwt_width);
 
-    // Build BWT sequentially by streaming SA and random access to text
-    std::string bwt_file = cache_file_name(sdsl::conf::KEY_BWT, *t_config);
-    bwt_type bwt_buf(bwt_file, std::ios::out, buffer_size, bwt_width);
+		f.clear();
+		f.resize(256, 0);
 
-    f.clear();
-    f.resize(256, 0);
+		auto report_bwt = [&bwt_buf, &f](auto idx, auto symbol) {
+		  bwt_buf.push_back(symbol);
+		  ++f[symbol + 1];
+		};
 
-    auto report_bwt = [&bwt_buf, &f](auto idx, auto symbol) {
-      bwt_buf.push_back(symbol);
-      ++f[symbol + 1];
-    };
+		// Report BWT run heads
+		std::vector<std::size_t> bwt_heads_pos_vec;
+		bwt_heads_text_pos_vec.clear();
+		auto report_bwt_head =
+		    [&bwt_heads_pos_vec, &bwt_heads_text_pos_vec](
+		        const auto &run, const auto &idx, const auto &symbol, const auto &pos) {
+		      bwt_heads_pos_vec.emplace_back(idx);
+		      bwt_heads_text_pos_vec.emplace_back(pos);
+		    };
 
-    // Report BWT run heads
-    std::vector<std::size_t> bwt_heads_pos_vec;
-    bwt_heads_text_pos_vec.clear();
-    auto report_bwt_head =
-        [&bwt_heads_pos_vec, &bwt_heads_text_pos_vec](
-            const auto &run, const auto &idx, const auto &symbol, const auto &pos) {
-          bwt_heads_pos_vec.emplace_back(idx);
-          bwt_heads_text_pos_vec.emplace_back(pos);
-        };
+		// Report BWT run heads
+		std::vector<std::size_t> bwt_tails_pos_vec;
+		bwt_tails_text_pos_vec.clear();
+		auto report_bwt_tail =
+		    [&bwt_tails_pos_vec, &bwt_tails_text_pos_vec](
+		        const auto &run, const auto &idx, const auto &symbol, const auto &pos) {
+		      bwt_tails_pos_vec.emplace_back(idx);
+		      bwt_tails_text_pos_vec.emplace_back(pos);
+		    };
 
-    // Report BWT run heads
-    std::vector<std::size_t> bwt_tails_pos_vec;
-    bwt_tails_text_pos_vec.clear();
-    auto report_bwt_tail =
-        [&bwt_tails_pos_vec, &bwt_tails_text_pos_vec](
-            const auto &run, const auto &idx, const auto &symbol, const auto &pos) {
-          bwt_tails_pos_vec.emplace_back(idx);
-          bwt_tails_text_pos_vec.emplace_back(pos);
-        };
+		// Compute BWT and its runs
+		r = ri::computeBWT(text.size(),
+		                   [&sa_buf](auto idx) { return sa_buf[idx]; },
+		                   [&text](auto idx) { return text[idx]; },
+		                   report_bwt,
+		                   report_bwt_head,
+		                   report_bwt_tail);
 
-    // Compute BWT and its runs
-    r = ri::computeBWT(text.size(),
-                       [&sa_buf](auto idx) { return sa_buf[idx]; },
-                       [&text](auto idx) { return text[idx]; },
-                       report_bwt,
-                       report_bwt_head,
-                       report_bwt_tail);
+		assert(text.size() == bwt_buf.size());
+		assert(r == bwt_heads_pos_vec.size());
+		assert(r == bwt_tails_pos_vec.size());
 
-    assert(text.size() == bwt_buf.size());
-    assert(r == bwt_heads_pos_vec.size());
-    assert(r == bwt_tails_pos_vec.size());
+		auto log_n = sdsl::bits::hi(n) + 1;
 
-    auto log_n = sdsl::bits::hi(n) + 1;
+		// Build compact representations for heads and tails of the BWT runs
+		bwt_heads_pos = sdsl::int_vector<>(r, 0, log_n);
+		bwt_heads_text_pos = sdsl::int_vector<>(r, 0, log_n);
 
-    // Build compact representations for heads and tails of the BWT runs
-    bwt_heads_pos = sdsl::int_vector<>(r, 0, log_n);
-    bwt_heads_text_pos = sdsl::int_vector<>(r, 0, log_n);
+		bwt_tails_pos = sdsl::int_vector<>(r, 0, log_n);
+		bwt_tails_text_pos = sdsl::int_vector<>(r, 0, log_n);
 
-    bwt_tails_pos = sdsl::int_vector<>(r, 0, log_n);
-    bwt_tails_text_pos = sdsl::int_vector<>(r, 0, log_n);
+		bwt_heads_in_text_bv = sdsl::bit_vector(text.size(), 0);
 
-    bwt_heads_in_text_bv = sdsl::bit_vector(text.size(), 0);
+		for (std::size_t i = 0; i < r; ++i) {
+		  bwt_heads_pos[i] = bwt_heads_pos_vec[i];
+		  bwt_heads_text_pos[i] = bwt_heads_text_pos_vec[i];
+		  bwt_heads_in_text_bv[bwt_heads_text_pos_vec[i]] = 1;
 
-    for (std::size_t i = 0; i < r; ++i) {
-      bwt_heads_pos[i] = bwt_heads_pos_vec[i];
-      bwt_heads_text_pos[i] = bwt_heads_text_pos_vec[i];
-      bwt_heads_in_text_bv[bwt_heads_text_pos_vec[i]] = 1;
+		  bwt_tails_pos[i] = bwt_tails_pos_vec[i];
+		  bwt_tails_text_pos[i] = bwt_tails_text_pos_vec[i];
+		}
+		bwt_heads_in_text_bv_sd = sdsl::sd_vector<>(bwt_heads_in_text_bv);
 
-      bwt_tails_pos[i] = bwt_tails_pos_vec[i];
-      bwt_tails_text_pos[i] = bwt_tails_text_pos_vec[i];
-    }
-    bwt_heads_in_text_bv_sd = sdsl::sd_vector<>(bwt_heads_in_text_bv);
+		// Build F array.
+		for (std::size_t i = 1; i < 256; ++i) {
+		  f[i] += f[i - 1];
+		}
 
-    // Build F array.
-    for (std::size_t i = 1; i < 256; ++i) {
-      f[i] += f[i - 1];
-    }
-
-    assert(f[255] == n);
-  }
+		assert(f[255] == n);
+	}
 
   sdsl::store_to_cache(bwt_heads_pos, ri::KEY_BWT_HEADS, *t_config);
   sdsl::store_to_cache(bwt_heads_text_pos, ri::KEY_BWT_HEADS_TEXT_POS, *t_config);
@@ -193,12 +156,10 @@ auto BM_BuildBWT = [](benchmark::State &t_state, auto *t_config) {
 
   sdsl::store_to_cache(f, ri::KEY_F, *t_config);
 
-  SetupCommonCounters(t_state);
-  t_state.counters["r"] = r;
-};
+}
 
 /// Build run length codification of Burrows Wheeler Transforms.
-auto BM_BuildBWTRunLengthEncoded = [](benchmark::State &t_state, auto *t_config) {
+void construct_bwt_rle(sdsl::cache_config *t_config){
   std::size_t buffer_size = 1000000; // buffer_size is a multiple of 8!, TODO: still true?
   std::string bwt_file = cache_file_name(sdsl::conf::KEY_BWT, *t_config);
   sdsl::int_vector_buffer<8> bwt_buf(bwt_file, std::ios::in, buffer_size);
@@ -207,23 +168,21 @@ auto BM_BuildBWTRunLengthEncoded = [](benchmark::State &t_state, auto *t_config)
   replace_copy(bwt_buf.begin(), bwt_buf.end(), back_inserter(bwt_s), 0, 1);
 
   ri::rle_string<> bwt_rle;
-  for (auto _ : t_state) {
+  {
     bwt_rle = ri::rle_string<>(bwt_s);
   }
 
   sdsl::store_to_cache(bwt_rle, ri::KEY_BWT_RLE, *t_config);
-
-  SetupCommonCounters(t_state);
 };
 
 /// Sort BWT run tails by its positions in the text.
-auto BM_SortBWTTailsTextPos = [](benchmark::State &t_state, auto *t_config) {
+void sort_bwt_tails(sdsl::cache_config *t_config){
   std::vector<std::size_t> bwt_tails_text_pos_vec;
   sdsl::load_from_cache(bwt_tails_text_pos_vec, ri::KEY_BWT_TAILS_TEXT_POS + "_vec", *t_config);
 
   std::vector<std::size_t> tails_idxs; // Indices of the run tails sorted by its text positions
 
-  for (auto _ : t_state) {
+  {
     tails_idxs.clear();
     tails_idxs.resize(bwt_tails_text_pos_vec.size());
     iota(tails_idxs.begin(), tails_idxs.end(), 0);
@@ -236,12 +195,10 @@ auto BM_SortBWTTailsTextPos = [](benchmark::State &t_state, auto *t_config) {
   }
 
   sdsl::store_to_cache(tails_idxs, ri::KEY_BWT_TAILS_TEXT_POS_SORTED_IDX + "_vec", *t_config);
-
-  SetupCommonCounters(t_state);
 };
 
 /// Sort BWT run heads by its positions in the text.
-auto BM_SortBWTHeadsTextPos = [](benchmark::State &t_state, auto *t_config) {
+void sort_bwt_heads(sdsl::cache_config *t_config){
   std::vector<std::size_t> bwt_heads_text_pos_vec;
   sdsl::load_from_cache(bwt_heads_text_pos_vec, ri::KEY_BWT_HEADS_TEXT_POS + "_vec", *t_config);
   auto r = bwt_heads_text_pos_vec.size();
@@ -250,7 +207,7 @@ auto BM_SortBWTHeadsTextPos = [](benchmark::State &t_state, auto *t_config) {
   std::vector<std::size_t> heads_idxs; // Indices of the run tails sorted by its text positions
   sdsl::int_vector<> tail_idxs_by_heads_in_text;
 
-  for (auto _ : t_state) {
+  {
     heads_idxs.clear();
     heads_idxs.resize(r);
     iota(heads_idxs.begin(), heads_idxs.end(), 0);
@@ -272,13 +229,10 @@ auto BM_SortBWTHeadsTextPos = [](benchmark::State &t_state, auto *t_config) {
   sdsl::store_to_cache(tail_idxs_by_heads_in_text,
                        ri::KEY_BWT_TAILS_SAMPLED_IDX_BY_HEAD_IN_TEXT,
                        *t_config);
-
-  SetupCommonCounters(t_state);
 };
 
 /// Build BWT run tails sampling.
-auto BM_BuildBWTTailsSampling = [](benchmark::State &t_state, auto *t_config) {
-  std::size_t s = t_state.range(0); // Sampling size
+void tails_sampling(sdsl::cache_config *t_config, std::size_t s){
 
   std::vector<std::size_t> bwt_tails_text_pos_vec;
   sdsl::load_from_cache(bwt_tails_text_pos_vec, ri::KEY_BWT_TAILS_TEXT_POS + "_vec", *t_config);
@@ -307,7 +261,7 @@ auto BM_BuildBWTTailsSampling = [](benchmark::State &t_state, auto *t_config) {
 
   std::size_t r_prime = 0;
 
-  for (auto _ : t_state) {
+  {
     sampled_idxs_vec.clear();
     sampled_idxs_vec.reserve(tails_idxs_sorted.size() / 2);
 
@@ -362,15 +316,10 @@ auto BM_BuildBWTTailsSampling = [](benchmark::State &t_state, auto *t_config) {
   sdsl::store_to_cache(sampled_tails_idx_bv_sd,
                        std::to_string(s) + "_" + ri::KEY_BWT_TAILS_SAMPLED_IDX + "_bv_sd",
                        *t_config);
-
-  SetupCommonCounters(t_state);
-  t_state.counters["s"] = s;
-  t_state.counters["r'"] = r_prime;
 };
 
 /// Build BWT run heads sampling.
-auto BM_BuildBWTHeadsSampling = [](benchmark::State &t_state, auto *t_config) {
-  std::size_t s = t_state.range(0);
+void heads_sampling(sdsl::cache_config *t_config, std::size_t s){
 
   std::vector<std::size_t> heads_in_text_vec;
   sdsl::load_from_cache(heads_in_text_vec, ri::KEY_BWT_HEADS_TEXT_POS + "_vec", *t_config);
@@ -401,7 +350,7 @@ auto BM_BuildBWTHeadsSampling = [](benchmark::State &t_state, auto *t_config) {
   sdsl::bit_vector sampled_heads_in_text_bv; // Mark positions of sampled BWT run heads in text (bitvector)
   sdsl::sd_vector<> sampled_heads_in_text_bv_sd; // Mark positions of sampled BWT run heads in text (sparse bitvector)
 
-  for (auto _ : t_state) {
+  {
     sampled_tail_idx_by_heads_in_text_vec.clear();
     sampled_tail_idx_by_heads_in_text_vec.resize(r_prime);
     std::iota(sampled_tail_idx_by_heads_in_text_vec.begin(), sampled_tail_idx_by_heads_in_text_vec.end(), 0);
@@ -492,69 +441,38 @@ auto BM_BuildBWTHeadsSampling = [](benchmark::State &t_state, auto *t_config) {
   sdsl::store_to_cache(trusted_area_for_marked_sampled_idxs,
                        std::to_string(s) + "_" + ri::KEY_BWT_HEADS_MARKED_SAMPLED_TRUSTED_AREA_IN_TEXT,
                        *t_config);
-
-  SetupCommonCounters(t_state);
-  t_state.counters["s"] = s;
-  t_state.counters["r'"] = r_prime;
-  t_state.counters["mr'"] = count(marked_sampled_idxs_vec.begin(), marked_sampled_idxs_vec.end(), true);
 };
 
+
+
 int main(int argc, char **argv) {
-  gflags::SetUsageMessage("This program calculates the ri items for the given text.");
-  gflags::AllowCommandLineReparsing();
-  gflags::ParseCommandLineFlags(&argc, &argv, false);
 
-  if (FLAGS_data.empty()) {
-    std::cerr << "Command-line error!!!" << std::endl;
-    return 1;
-  }
+		std::string input_file = std::string(argv[1]);
+		sdsl::cache_config config(false, ".", sdsl::util::basename(input_file));
+    std::cout << "Computing the sr-index of: " << input_file << "\n##########################\n";
 
-  sdsl::construct_config::byte_algo_sa = FLAGS_sais
-                                         ? sdsl::SE_SAIS
-                                         : sdsl::LIBDIVSUFSORT; // or LIBDIVSUFSORT for less space-efficient but faster construction
+    std::cout << "constructing sdsl text representation\n";
+		construct_text(input_file, &config);
+    std::cout << "constructing the suffix array\n";
+		construct_sa(&config);
+    std::cout << "constructing the bwt\n";
+		construct_bwt(&config);
+    std::cout << "constructing the rle bwt\n";
+		construct_bwt_rle(&config);
+    std::cout << "sorting the bwt tails\n";
+    sort_bwt_tails(&config);
+    std::cout << "sorting the bwt heads\n";
+		sort_bwt_heads(&config);
 
-  std::string data_path = FLAGS_data;
+		for(std::size_t i=0; i<5; ++i)
+		{
+				std::size_t s = 4 * std::pow(2,i);
 
-  sdsl::cache_config config(false, ".", sdsl::util::basename(FLAGS_data));
+        std::cout << "sampling tails with s: " << s << '\n';
+				tails_sampling(&config, s);
+        std::cout << "sampling heads with s: " << s << '\n';
+				heads_sampling(&config, s);
+		}
 
-  if (!cache_file_exists(sdsl::conf::KEY_TEXT, config) || FLAGS_rebuild) {
-    benchmark::RegisterBenchmark("BuildText", BM_BuildText, &config, data_path);
-  }
-
-  if (!cache_file_exists(sdsl::conf::KEY_SA, config) || FLAGS_rebuild) {
-    benchmark::RegisterBenchmark("BuildSA", BM_BuildSA, &config);
-  }
-
-  if (!cache_file_exists(sdsl::conf::KEY_BWT, config) || FLAGS_rebuild) {
-    benchmark::RegisterBenchmark("BuildBWT", BM_BuildBWT, &config);
-  }
-
-  if (!cache_file_exists(ri::KEY_BWT_RLE, config) || FLAGS_rebuild) {
-    benchmark::RegisterBenchmark("BuildBWTRLE", BM_BuildBWTRunLengthEncoded, &config);
-  }
-
-  if (!cache_file_exists(ri::KEY_BWT_TAILS_TEXT_POS_SORTED_IDX + "_vec", config) || FLAGS_rebuild) {
-    benchmark::RegisterBenchmark("SortBWTTailsTPos", BM_SortBWTTailsTextPos, &config);
-  }
-
-  if (!cache_file_exists(ri::KEY_BWT_HEADS_TEXT_POS_SORTED_IDX + "_vec", config) || FLAGS_rebuild) {
-    benchmark::RegisterBenchmark("SortBWTHeadsTPos", BM_SortBWTHeadsTextPos, &config);
-  }
-
-  if (!cache_file_exists("16_" + ri::KEY_BWT_TAILS_TEXT_POS_SAMPLED, config) || FLAGS_rebuild) {
-    benchmark::RegisterBenchmark("BuildBWTTailsSampling", BM_BuildBWTTailsSampling, &config)
-        ->RangeMultiplier(2)
-        ->Range(4, 2u << 8u);
-  }
-
-  if (!cache_file_exists("16_" + ri::KEY_BWT_HEADS_SAMPLED_TEXT_POS + "_bv", config) || FLAGS_rebuild) {
-    benchmark::RegisterBenchmark("BuildBWTHeadsSampling", BM_BuildBWTHeadsSampling, &config)
-        ->RangeMultiplier(2)
-        ->Range(4, 2u << 8u);
-  }
-
-  benchmark::Initialize(&argc, argv);
-  benchmark::RunSpecifiedBenchmarks();
-
-  return 0;
+    return 0;
 }
